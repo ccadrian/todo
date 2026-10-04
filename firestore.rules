@@ -1,0 +1,80 @@
+rules_version = '2';
+
+// Glass To‑do – Firestore-Sicherheitsregeln
+// Grundsatz: Jeder Nutzer darf ausschließlich unter users/{seine uid} lesen und schreiben.
+// Alles, was hier nicht ausdrücklich erlaubt ist, ist verboten.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    // ---------- Validierung ----------
+
+    // Aufgabe: users/{uid}/tasks/{taskId}
+    function validTask(d) {
+      return d.keys().hasAll(['text', 'prio', 'done', 'order', 'createdAt', 'doneAt', 'updatedAt'])
+        && d.keys().hasOnly(['text', 'prio', 'done', 'order', 'createdAt', 'doneAt', 'updatedAt'])
+        && d.text is string && d.text.size() >= 1 && d.text.size() <= 500
+        && d.prio in ['yellow', 'red']
+        && d.done is bool
+        && d.order is number && d.order == d.order          // schließt NaN aus
+        && d.order > -1000000000000000 && d.order < 1000000000000000
+        && d.createdAt is timestamp
+        && (d.doneAt == null || d.doneAt is timestamp)
+        && d.updatedAt == request.time;                     // muss serverTimestamp() sein
+    }
+
+    // Hintergrund-Einstellung im Nutzer-Dokument
+    function validBg(bg) {
+      return bg is map
+        && bg.keys().hasOnly(['kind', 'url'])
+        && bg.kind in ['default', 'url', 'upload']
+        && (
+          (bg.kind == 'url' && bg.url is string && bg.url.size() <= 2048 && bg.url.matches('https://[^\\s]+'))
+          || (bg.kind != 'url' && bg.get('url', null) == null)
+        );
+    }
+
+    // Nutzer-Dokument: users/{uid}
+    function validSettings(d) {
+      return d.keys().hasOnly(['bg', 'updatedAt'])
+        && (!('bg' in d) || validBg(d.bg))
+        && d.updatedAt == request.time;
+    }
+
+    // Eigenes Hintergrundbild (komprimiert, Base64): users/{uid}/assets/background
+    function validBackground(d) {
+      return d.keys().hasAll(['mime', 'data', 'updatedAt'])
+        && d.keys().hasOnly(['mime', 'data', 'updatedAt'])
+        && d.mime in ['image/webp', 'image/jpeg']
+        && d.data is string && d.data.size() >= 1 && d.data.size() <= 900000
+        && d.updatedAt == request.time;
+    }
+
+    // ---------- Pfade ----------
+
+    match /users/{uid} {
+      allow read, delete: if isOwner(uid);
+      allow create, update: if isOwner(uid) && validSettings(request.resource.data);
+
+      match /tasks/{taskId} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid)
+          && taskId.size() <= 64
+          && validTask(request.resource.data);
+        allow update: if isOwner(uid)
+          && validTask(request.resource.data)
+          && request.resource.data.createdAt == resource.data.createdAt;
+      }
+
+      match /assets/{assetId} {
+        allow read, delete: if isOwner(uid) && assetId == 'background';
+        allow create, update: if isOwner(uid)
+          && assetId == 'background'
+          && validBackground(request.resource.data);
+      }
+    }
+  }
+}

@@ -1,0 +1,1334 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="referrer" content="strict-origin-when-cross-origin" />
+  <meta name="theme-color" content="#4a5a6a" />
+  <title>Glass To‑do</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+  <style>
+    /* ===== Basis & Variablen ===== */
+    :root{ --glass-border: rgba(255,255,255,.35); --text:#fff; --muted:rgba(255,255,255,.8); --shadow:0 30px 60px rgba(0,0,0,.35);
+      --default-bg:url('https://images.unsplash.com/photo-1533105079780-92b9be482077?q=80&w=1920&auto=format&fit=crop'); }
+    *{box-sizing:border-box}
+    [hidden]{display:none !important}
+    html{background:#2b3440}
+    html,body{min-height:100%}
+    body{margin:0; font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial; color:var(--text); overflow-x:hidden; -webkit-tap-highlight-color:transparent}
+    body.is-dragging{user-select:none; -webkit-user-select:none; cursor:grabbing}
+
+    /* Hintergrund-Ebene (ersetzt background-attachment:fixed, funktioniert auch auf iOS) */
+    .bg-layer{position:fixed; inset:0; z-index:-1; background-image:var(--default-bg); background-size:cover; background-position:center}
+    .scrim{position:fixed; inset:0; background:radial-gradient(1200px 800px at 60% 20%, rgba(0,0,0,.08), rgba(0,0,0,.25)); pointer-events:none}
+    .stage{position:relative; min-height:100vh; min-height:100dvh; display:grid; place-items:center; padding:72px clamp(12px,2vw,32px) 88px}
+
+    /* ===== Glas-Karte ===== */
+    .card{ width:min(560px,86vw); min-height:320px; backdrop-filter:blur(16px) saturate(120%); -webkit-backdrop-filter:blur(16px) saturate(120%);
+      background:linear-gradient(180deg,rgba(255,255,255,.18),rgba(255,255,255,.10)); border:1px solid var(--glass-border); border-radius:24px; box-shadow:var(--shadow);
+      padding:22px 22px 28px; position:relative; overflow:hidden; background-clip:padding-box; clip-path: inset(0 round 24px); }
+
+    /* macOS Ampel-Buttons (Filter) */
+    .traffic{position:absolute; top:12px; left:14px; display:flex; gap:8px}
+    .light{appearance:none; padding:0; margin:0; font:inherit; display:block; width:12px; height:12px; border-radius:50%; border:1px solid rgba(0,0,0,.15); cursor:pointer; background:currentColor; position:relative}
+    .light::before{content:""; position:absolute; inset:-4px}
+    .light.red{color:#ff5f57}
+    .light.yellow{color:#ffbd2e}
+    .light.green{color:#28c840}
+    .light:hover::after, .light:focus-visible::after{content:attr(data-symbol); position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:10px; color:#333}
+
+    .title{margin:0; font-weight:800; letter-spacing:.2px; font-size:clamp(18px,2.6vw,22px); opacity:.95; text-shadow:0 1px 2px rgba(0,0,0,.3); text-align:center}
+    .filterLabel{position:absolute; top:10px; right:16px; font-size:12px; color:var(--muted); font-weight:700; text-shadow:0 1px 2px rgba(0,0,0,.3)}
+
+    .row{display:flex; align-items:center; gap:10px; margin-top:14px}
+    .input{flex:1; min-width:0; background:rgba(255,255,255,.22); border:1px solid rgba(255,255,255,.45); border-radius:14px; padding:10px 14px; font-weight:600; color:#0b0b0b; box-shadow:inset 0 0 0 1px rgba(255,255,255,.25)}
+    .input::placeholder{color:#3b3b3b; opacity:.7; font-weight:600}
+
+    /* Prioritätspunkte */
+    .prio-group{display:flex; align-items:center; gap:10px}
+    .dot{appearance:none; padding:0; margin:0; flex:none; position:relative; width:18px; height:18px; border-radius:50%; box-shadow:inset 0 1px 0 rgba(255,255,255,.6), 0 1px 6px rgba(0,0,0,.25); border:1px solid rgba(255,255,255,.6); cursor:pointer; outline:2px solid transparent}
+    .dot::before{content:""; position:absolute; inset:-6px}
+    .dot.yellow{background:#ffd84d}
+    .dot.red{background:#ff5f57}
+    .dot.active{outline-color:rgba(0,0,0,.25)}
+
+    .addBtn{appearance:none; border:1px solid rgba(255,255,255,.65); background:rgba(255,255,255,.85); color:#0b0b0b; padding:10px 14px; border-radius:12px; font-weight:800; cursor:pointer}
+
+    .actions{margin-top:10px; display:flex; gap:10px; justify-content:flex-end}
+    .ghost{appearance:none; background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.45); color:#0b0b0b; padding:8px 12px; border-radius:12px; font-weight:700; cursor:pointer}
+
+    /* ===== Liste ===== */
+    .lists{margin-top:12px; padding-bottom:36px}
+    .list{display:grid; gap:10px; margin:0; padding:0 6px 0 0; list-style:none; max-height:clamp(160px,50vh,460px); overflow:auto; overscroll-behavior:contain; scrollbar-width:thin; scrollbar-color: rgba(255,255,255,.65) rgba(255,255,255,.18)}
+
+    .todo{display:flex; align-items:center; gap:10px; background:rgba(255,255,255,.78); border:1px solid rgba(255,255,255,.88); border-radius:999px; padding:10px 14px; color:#0c0c0c; box-shadow:0 10px 30px rgba(0,0,0,.12); transition:transform .18s ease, opacity .18s ease; touch-action:manipulation}
+    .todo.appear{animation:pop .18s ease}
+    @keyframes pop{from{transform:scale(.98); opacity:.0} to{transform:scale(1); opacity:1}}
+    .todo.bye{transform:translateY(4px) scale(.98); opacity:0}
+    .todo.dragging{opacity:.9; box-shadow:0 16px 40px rgba(0,0,0,.28); transition:none}
+
+    .handle{appearance:none; background:transparent; border:0; padding:6px 4px; margin:-6px -4px; font:inherit; color:inherit; line-height:1; cursor:grab; touch-action:none; user-select:none; -webkit-user-select:none; border-radius:6px}
+    .check{appearance:none; flex:none; width:18px; height:18px; margin:0; border-radius:6px; border:2px solid #0b0b0b; display:grid; place-items:center; cursor:pointer}
+    .check:checked{background:#0b0b0b}
+    .check:checked::after{content:""; width:8px; height:8px; background:#fff; border-radius:2px}
+    .prio{flex:none; width:12px; height:12px; border-radius:50%; border:1px solid rgba(0,0,0,.15)}
+    .prio.yellow{background:#ffd84d}
+    .prio.red{background:#ff5f57}
+    .todo-text{font-weight:700; flex:1; min-width:0; white-space:normal; overflow-wrap:break-word; border-radius:6px}
+    .edit-input{flex:1; min-width:0; font:inherit; font-weight:700; color:inherit; background:rgba(255,255,255,.7); border:1px solid rgba(0,0,0,.18); border-radius:8px; padding:2px 6px}
+    .remove{appearance:none; border:0; background:transparent; font-weight:800; cursor:pointer; padding:4px 8px; color:inherit; border-radius:8px}
+    .done .todo-text{opacity:.6; text-decoration:line-through}
+
+    /* Fortschritt */
+    .progress-wrap{position:absolute; left:22px; right:22px; bottom:8px; pointer-events:none}
+    .progress-label{font-size:12px; color:var(--muted); margin-bottom:4px; font-weight:600; text-shadow:0 1px 2px rgba(0,0,0,.25)}
+    .progress{height:8px; border-radius:999px; background:rgba(255,255,255,.35); overflow:hidden; border:1px solid rgba(255,255,255,.6)}
+    .progress>div{height:100%; width:0%; background:linear-gradient(90deg,#9cffd7,#fffac4); box-shadow:0 0 12px rgba(255,255,255,.7) inset; transition:width .25s ease}
+
+    /* ===== Footer & Hintergrund-Button ===== */
+    .footer-link{position:fixed; bottom:10px; text-decoration:none; color:rgba(255,255,255,.95); font-weight:700; text-shadow:0 1px 2px rgba(0,0,0,.35); border-radius:6px}
+    .footer-left{left:12px}
+    .footer-center{left:50%; transform:translateX(-50%)}
+
+    .bg-fab{position:fixed; right:16px; bottom:16px; width:56px; height:56px; border-radius:50%; display:grid; place-items:center; font-size:22px; backdrop-filter:blur(14px) saturate(120%); -webkit-backdrop-filter:blur(14px) saturate(120%); background:linear-gradient(180deg,rgba(255,255,255,.7),rgba(255,255,255,.35)); border:1px solid rgba(255,255,255,.65); box-shadow:0 10px 30px rgba(0,0,0,.35); color:#0b0b0b; cursor:pointer}
+    .bg-fab:hover{transform:translateY(-1px); box-shadow:0 14px 36px rgba(0,0,0,.4)}
+
+    /* Hintergrund-Panel */
+    .bg-panel{position:fixed; bottom:88px; right:16px; z-index:50; width:min(360px,92vw); display:grid; grid-template-columns:1fr auto; gap:8px; padding:12px; border-radius:16px; backdrop-filter:blur(16px) saturate(120%); -webkit-backdrop-filter:blur(16px) saturate(120%); background:linear-gradient(180deg,rgba(255,255,255,.22),rgba(255,255,255,.12)); border:1px solid rgba(255,255,255,.45); box-shadow:0 20px 40px rgba(0,0,0,.35)}
+    .bg-panel.hidden{display:none}
+    .bg-panel h3{grid-column:1 / -1; margin:0 0 4px 0; font-size:13px; letter-spacing:.2px; text-transform:uppercase; color:rgba(255,255,255,.9)}
+    .bg-panel .input{background:rgba(255,255,255,.22); border:1px solid rgba(255,255,255,.45); border-radius:12px; padding:8px 12px; font-weight:600; color:#0b0b0b}
+    .bg-panel .btn{appearance:none; border:1px solid rgba(255,255,255,.65); background:rgba(255,255,255,.9); color:#0b0b0b; padding:8px 12px; border-radius:10px; font-weight:800; cursor:pointer}
+    .bg-panel .row{grid-column:1 / -1; display:flex; gap:8px; justify-content:flex-end}
+    .bg-panel .hint{grid-column:1 / -1}
+
+    /* ===== Login ===== */
+    .login-btn{position:fixed; top:10px; left:10px; z-index:55; max-width:min(70vw,280px); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; appearance:none; cursor:pointer; font-weight:800; padding:8px 14px; border-radius:999px; color:#0b0b0b; border:1px solid rgba(255,255,255,.55); backdrop-filter:blur(12px) saturate(120%); -webkit-backdrop-filter:blur(12px) saturate(120%); background:linear-gradient(180deg,rgba(255,255,255,.85),rgba(255,255,255,.55)); box-shadow:0 8px 24px rgba(0,0,0,.25)}
+    .login-btn:hover{transform:translateY(-1px); box-shadow:0 12px 28px rgba(0,0,0,.3)}
+    .login-panel{position:fixed; top:56px; left:16px; z-index:60; width:min(360px,92vw); max-height:calc(100dvh - 72px); overflow:auto; display:grid; grid-template-columns:1fr; gap:10px; padding:14px; border-radius:16px; backdrop-filter:blur(16px) saturate(120%); -webkit-backdrop-filter:blur(16px) saturate(120%); background:linear-gradient(180deg,rgba(255,255,255,.26),rgba(255,255,255,.14)); border:1px solid rgba(255,255,255,.5); box-shadow:0 20px 40px rgba(0,0,0,.35)}
+    .login-panel.hidden{display:none}
+    .login-panel h3{margin:0 0 4px 0; font-size:16px; font-weight:800; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.35)}
+    .login-panel form{display:grid; gap:10px}
+    .login-panel .input{background:rgba(255,255,255,.22); border:1px solid rgba(255,255,255,.5); border-radius:12px; padding:10px 12px; font-weight:600; color:#0b0b0b}
+    .login-panel .btn{appearance:none; border:1px solid rgba(255,255,255,.65); background:rgba(255,255,255,.92); color:#0b0b0b; padding:10px 12px; border-radius:12px; font-weight:800; cursor:pointer; box-shadow:0 6px 16px rgba(0,0,0,.2)}
+    .login-panel .btn:hover{transform:translateY(-1px)}
+    .login-panel .btn:disabled, .bg-panel .btn:disabled{opacity:.6; cursor:progress; transform:none}
+    .login-panel .row{display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end}
+    .login-panel form .row{margin-top:0}
+    .hint{margin:0; font-size:13px; font-weight:600; line-height:1.35; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.35); overflow-wrap:anywhere}
+
+    /* ===== Dialoge (Glas, wie der frühere Hinweis-Dialog) ===== */
+    .modal{position:fixed; inset:0; z-index:70; display:flex; align-items:center; justify-content:center; padding:16px; background:rgba(0,0,0,.6)}
+    .modal-box{width:min(520px,92vw); max-height:calc(100dvh - 32px); overflow:auto; backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); background:linear-gradient(180deg,rgba(255,255,255,.9),rgba(255,255,255,.7)); border:1px solid rgba(255,255,255,.65); border-radius:18px; padding:18px; box-shadow:0 20px 40px rgba(0,0,0,.4); color:#0b0b0b; animation:pop .18s ease}
+    .modal-title{margin:0 0 6px; font-weight:800; font-size:18px}
+    .modal-body{opacity:.85; line-height:1.4}
+    .modal-body p{margin:0 0 8px}
+    .modal-list{list-style:none; margin:8px 0; padding:0; display:grid; gap:6px}
+    .modal-list label{display:flex; gap:8px; align-items:center; font-weight:600; cursor:pointer}
+    .modal-list input{width:18px; height:18px; margin:0; accent-color:#0b0b0b}
+    .modal-actions{display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; margin-top:12px}
+    .modal .btn{appearance:none; border:1px solid rgba(255,255,255,.65); background:rgba(255,255,255,.9); color:#0b0b0b; padding:8px 12px; border-radius:10px; font-weight:800; cursor:pointer}
+    .modal .btn.primary{border-color:rgba(0,0,0,.35)}
+
+    /* ===== Toasts ===== */
+    .toasts{position:fixed; top:12px; left:50%; transform:translateX(-50%); z-index:80; display:grid; gap:8px; width:min(420px,92vw); pointer-events:none}
+    .toast{pointer-events:auto; display:flex; align-items:center; gap:10px; padding:10px 14px; border-radius:14px; color:#0b0b0b; font-weight:700; font-size:14px; line-height:1.3; backdrop-filter:blur(14px) saturate(120%); -webkit-backdrop-filter:blur(14px) saturate(120%); background:linear-gradient(180deg,rgba(255,255,255,.88),rgba(255,255,255,.62)); border:1px solid rgba(255,255,255,.65); box-shadow:0 10px 30px rgba(0,0,0,.3); animation:pop .18s ease; transition:opacity .2s ease, transform .2s ease}
+    .toast.out{opacity:0; transform:translateY(-4px)}
+    .toast-dot{flex:none; width:10px; height:10px; border-radius:50%; border:1px solid rgba(0,0,0,.15); background:#ffbd2e}
+    .toast.success .toast-dot{background:#28c840}
+    .toast.error .toast-dot{background:#ff5f57}
+    .toast-msg{flex:1; overflow-wrap:anywhere}
+    .toast-btn{appearance:none; flex:none; border:1px solid rgba(0,0,0,.15); background:rgba(255,255,255,.95); color:#0b0b0b; border-radius:10px; padding:6px 10px; font-weight:800; cursor:pointer}
+
+    .sr-only{position:absolute !important; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0}
+
+    /* ===== Fokus-Stile (Tastatur) ===== */
+    :focus-visible{outline:2px solid #fff; outline-offset:2px; box-shadow:0 0 0 4px rgba(0,0,0,.45)}
+    .dot:focus-visible{outline-color:#fff}
+    .input:focus-visible, .edit-input:focus-visible{outline-offset:0}
+    .todo :focus-visible{outline-color:#0b0b0b; box-shadow:0 0 0 4px rgba(255,255,255,.9)}
+
+    /* ===== Responsiv ===== */
+    @media (max-width:600px){
+      .stage{padding:64px 12px 104px}
+      .card{width:100%; padding:20px 16px 28px}
+      .progress-wrap{left:16px; right:16px}
+      .footer-left{bottom:34px}
+      .footer-center{left:12px; transform:none}
+      .toasts{top:56px}
+      .bg-panel{right:12px; left:12px; width:auto}
+      .login-panel{left:12px; right:12px; width:auto}
+    }
+    @media (max-width:420px){
+      .card .row{flex-wrap:wrap}
+      .card .row .input{flex:1 1 100%}
+      .card .row .addBtn{margin-left:auto}
+      .filterLabel{right:12px}
+      .title{padding-top:10px}
+    }
+    @media (pointer:coarse){
+      .input, .edit-input{font-size:16px}
+      .remove{padding:8px 10px}
+    }
+    /* Bewegung reduzieren */
+    @media (prefers-reduced-motion: reduce){
+      *, *::before, *::after{animation:none !important; transition:none !important; scroll-behavior:auto !important}
+    }
+  </style>
+</head>
+<body>
+  <div class="bg-layer" id="bgLayer" aria-hidden="true"></div>
+
+  <!-- Login-Button oben links -->
+  <button id="loginOpen" class="login-btn" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="loginPanel">Login</button>
+
+  <main class="stage">
+    <section class="card" aria-labelledby="appTitle">
+      <div class="traffic" role="group" aria-label="Filter">
+        <button class="light red" id="fAll" type="button" data-symbol="x" title="Alle" aria-label="Filter: Alle Aufgaben" aria-pressed="true"></button>
+        <button class="light yellow" id="fOpen" type="button" data-symbol="-" title="Offen" aria-label="Filter: Offene Aufgaben" aria-pressed="false"></button>
+        <button class="light green" id="fDone" type="button" data-symbol=">" title="Erledigt" aria-label="Filter: Erledigte Aufgaben" aria-pressed="false"></button>
+      </div>
+      <h1 class="title" id="appTitle">To‑do App</h1>
+      <div class="filterLabel" id="filterLabel" aria-live="polite">Filter: Alle</div>
+
+      <div class="row">
+        <input class="input" id="newTask" placeholder="Neue Aufgabe hinzufügen" aria-label="Neue Aufgabe" maxlength="500" autocomplete="off" enterkeyhint="done" />
+        <div class="prio-group" role="group" aria-label="Priorität für neue Aufgabe">
+          <button class="dot yellow active" id="prioYellow" type="button" title="Priorität: Gelb (normal)" aria-label="Priorität Gelb (normal)" aria-pressed="true"></button>
+          <button class="dot red" id="prioRed" type="button" title="Priorität: Rot (hoch)" aria-label="Priorität Rot (hoch)" aria-pressed="false"></button>
+        </div>
+        <button class="addBtn" id="addBtn" type="button">Hinzufügen</button>
+      </div>
+
+      <div class="actions">
+        <button class="ghost" id="exportBtn" type="button" aria-label="Aufgaben als JSON exportieren">Export</button>
+        <button class="ghost" id="importBtn" type="button" aria-label="Aufgaben aus JSON-Datei importieren">Import</button>
+        <input type="file" id="fileInput" accept="application/json,.json" hidden />
+      </div>
+
+      <p id="listHelp" class="sr-only">Doppelklick, Doppeltipp oder Enter auf eine Aufgabe zum Bearbeiten. Den Griff mit Maus oder Finger ziehen oder mit den Pfeiltasten hoch und runter verschieben.</p>
+      <div class="lists"><ul class="list" id="list" aria-label="Aufgaben" aria-describedby="listHelp"></ul></div>
+
+      <div class="progress-wrap">
+        <div class="progress-label"><span id="progressText">0%</span> erledigt • <span id="statsText">0 offen · 0 erledigt</span></div>
+        <div class="progress" id="progress" role="progressbar" aria-label="Fortschritt" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="bar"></div></div>
+      </div>
+    </section>
+  </main>
+  <div class="scrim" aria-hidden="true"></div>
+
+  <!-- Login-Panel -->
+  <div id="loginPanel" class="login-panel hidden" role="dialog" aria-labelledby="loginTitle">
+    <h3 id="loginTitle">Login</h3>
+    <form id="authForm" novalidate>
+      <input id="loginEmail" class="input" type="email" placeholder="E‑Mail" aria-label="E‑Mail" autocomplete="email" inputmode="email" required />
+      <input id="loginPass" class="input" type="password" placeholder="Passwort (mind. 6 Zeichen)" aria-label="Passwort" autocomplete="current-password" minlength="6" required />
+      <button id="loginSubmit" class="btn" type="submit">Anmelden</button>
+      <div class="row">
+        <button id="registerBtn" class="btn" type="button">Registrieren</button>
+        <button id="resetBtn" class="btn" type="button">Passwort vergessen?</button>
+      </div>
+      <button id="googleBtn" class="btn" type="button">Mit Google anmelden</button>
+    </form>
+    <div id="accountBox" hidden>
+      <p class="hint">Angemeldet als <strong id="accountEmail"></strong></p>
+    </div>
+    <p id="authHint" class="hint"></p>
+    <div class="row">
+      <button id="logoutBtn" class="btn" type="button" hidden>Abmelden</button>
+      <button id="loginClose" class="btn" type="button">Schließen</button>
+    </div>
+  </div>
+
+  <!-- Footer links / Mitte, rechts der Hintergrund-Button -->
+  <footer>
+    <a class="footer-link footer-left" href="mailto:adrian@schlitt.co">adrian@schlitt.co</a>
+    <a class="footer-link footer-center" href="https://schlitt.co" target="_blank" rel="noopener">© schlitt.co</a>
+  </footer>
+  <button id="bgOpen" class="bg-fab" type="button" aria-label="Hintergrund ändern" title="Hintergrund ändern" aria-haspopup="dialog" aria-expanded="false" aria-controls="bgPanel">🖼️</button>
+
+  <!-- Hintergrund-Panel -->
+  <div id="bgPanel" class="bg-panel hidden" role="dialog" aria-labelledby="bgPanelTitle">
+    <h3 id="bgPanelTitle">Hintergrund</h3>
+    <input id="bgUrl" class="input" type="url" inputmode="url" placeholder="Direkter Bildlink (https://…)" aria-label="Direkter Bildlink" />
+    <button id="bgApply" class="btn" type="button">Übernehmen</button>
+    <p class="hint">Nur direkte Bildlinks (z. B. …/bild.jpg). Eigene Bilder werden automatisch verkleinert.</p>
+    <div class="row">
+      <button id="bgUpload" class="btn" type="button">Hochladen</button>
+      <button id="bgReset" class="btn" type="button">Zurücksetzen</button>
+      <button id="bgClose" class="btn" type="button">Schließen</button>
+    </div>
+  </div>
+  <input type="file" id="bgFile" accept="image/*" hidden />
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <div id="srLive" class="sr-only" aria-live="polite"></div>
+
+  <script type="module">
+  'use strict';
+
+  /* =====================================================================
+     1) FIREBASE-KONFIGURATION – HIER DEINE WERTE EINFÜGEN
+     Firebase Console → Projekteinstellungen → Allgemein → „Meine Apps“ →
+     Web-App → „SDK-Einrichtung und -Konfiguration“ → Config.
+     Solange hier Platzhalter stehen, läuft die App nur im Gastmodus.
+     ===================================================================== */
+  const firebaseConfig = {
+    apiKey: 'DEIN_API_KEY',
+    authDomain: 'DEIN-PROJEKT.firebaseapp.com',
+    projectId: 'DEIN-PROJEKT',
+    appId: 'DEINE_APP_ID',
+  };
+  /* ===================== ENDE DER KONFIGURATION ===================== */
+
+  const FIREBASE_VERSION = '12.19.0';
+  const FIREBASE_READY = ['apiKey', 'authDomain', 'projectId', 'appId']
+    .every(k => typeof firebaseConfig[k] === 'string' && firebaseConfig[k] && !firebaseConfig[k].startsWith('DEIN'));
+
+  // ===== Konstanten =====
+  const MAX_TEXT = 500;                 // max. Zeichen pro Aufgabe (auch in den Regeln)
+  const MAX_IMPORT = 2000;              // max. Aufgaben pro Import
+  const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
+  const ORDER_STEP = 1024;              // Abstand der order-Werte
+  const BG_MAX_CHARS = 700000;          // Base64-Budget für eigene Hintergründe (~520 KB Bild)
+  const BG_MAX_WIDTH = 1920;
+  const LS_GUEST = 'glassTodos.v2';     // Gastmodus (gleicher Key wie die alte Version)
+  const LS_BG = 'glassTodos.bg';
+  const LS_MODE = 'glassTodos.lastMode';
+  const LS_LEGACY_USER = 'glassTodos.user';
+  const LS_PROFILE_PREFIX = 'glassTodos.profile.';
+  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+
+  // ===== DOM-Referenzen =====
+  const $ = id => document.getElementById(id);
+  const input = $('newTask'), listEl = $('list'), addBtn = $('addBtn');
+  const prioYellow = $('prioYellow'), prioRed = $('prioRed');
+  const bar = $('bar'), progressEl = $('progress'), progressText = $('progressText'), statsText = $('statsText');
+  const filterLabel = $('filterLabel');
+  const filterBtns = { all: $('fAll'), open: $('fOpen'), done: $('fDone') };
+  const exportBtn = $('exportBtn'), importBtn = $('importBtn'), fileInput = $('fileInput');
+  const loginOpen = $('loginOpen'), loginPanel = $('loginPanel'), loginTitle = $('loginTitle');
+  const authForm = $('authForm'), loginEmail = $('loginEmail'), loginPass = $('loginPass');
+  const loginSubmit = $('loginSubmit'), registerBtn = $('registerBtn'), resetBtn = $('resetBtn'), googleBtn = $('googleBtn');
+  const accountBox = $('accountBox'), accountEmail = $('accountEmail'), authHint = $('authHint');
+  const logoutBtn = $('logoutBtn'), loginClose = $('loginClose');
+  const bgLayer = $('bgLayer'), bgOpen = $('bgOpen'), bgPanel = $('bgPanel'), bgUrl = $('bgUrl');
+  const bgApply = $('bgApply'), bgUpload = $('bgUpload'), bgReset = $('bgReset'), bgClose = $('bgClose'), bgFile = $('bgFile');
+  const toastBox = $('toasts'), srLive = $('srLive');
+
+  // ===== Zustand =====
+  const state = {
+    tasks: [],            // sortiert nach order
+    filter: 'all',
+    prio: 'yellow',
+    store: null,          // aktiver Datenspeicher (lokal oder Cloud)
+    user: null,
+    dragId: null,
+    editingId: null,
+    refocus: null,
+    pendingWrites: false,
+    migrationAsked: false,
+  };
+  const els = new Map();  // taskId -> <li>
+  let fb = null;          // Firebase-Module, wenn geladen
+  let unsubs = [];
+  let wasOffline = !navigator.onLine;
+
+  // ===== Hilfsfunktionen =====
+  function mk(tag, cls){ const e = document.createElement(tag); if(cls) e.className = cls; return e; }
+  function newId(){
+    if(crypto.randomUUID) return crypto.randomUUID().replace(/-/g, '');
+    const a = new Uint8Array(16); crypto.getRandomValues(a);
+    return Array.from(a, b => b.toString(16).padStart(2, '0')).join('');
+  }
+  const byId = id => state.tasks.find(t => t.id === id);
+  const short = (s, n = 40) => s.length > n ? s.slice(0, n - 1) + '…' : s;
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  const maxOrder = () => state.tasks.reduce((m, t) => Math.max(m, t.order), 0);
+  const sortTasks = arr => arr.slice().sort((a, b) => (a.order - b.order) || (a.createdAt - b.createdAt));
+  const lsGet = k => { try { return localStorage.getItem(k); } catch(e){ console.warn('localStorage nicht lesbar', e); return null; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, v); return true; } catch(e){ console.error('localStorage-Schreibfehler', e); return false; } };
+  const lsDel = k => { try { localStorage.removeItem(k); } catch(e){ console.warn('localStorage nicht löschbar', e); } };
+  function lsKeys(){ try { return Object.keys(localStorage); } catch(e){ console.warn(e); return []; } }
+  function announce(msg){ srLive.textContent = ''; setTimeout(() => { srLive.textContent = msg; }, 30); }
+
+  /* =====================================================================
+     2) TOASTS (Feedback statt alert)
+     ===================================================================== */
+  function toast(msg, { type = 'info', action = null, duration } = {}){
+    const el = mk('div', 'toast ' + type);
+    el.setAttribute('role', type === 'error' ? 'alert' : 'status');
+    const dot = mk('span', 'toast-dot'); dot.setAttribute('aria-hidden', 'true');
+    const text = mk('span', 'toast-msg'); text.textContent = msg;
+    el.append(dot, text);
+    let timer;
+    const close = () => { clearTimeout(timer); el.classList.add('out'); setTimeout(() => el.remove(), reducedMotion.matches ? 0 : 200); };
+    if(action){
+      const b = mk('button', 'toast-btn'); b.type = 'button'; b.textContent = action.label;
+      b.addEventListener('click', () => { close(); action.run(); });
+      el.append(b);
+    }
+    el.addEventListener('click', e => { if(e.target === el || e.target === text) close(); });
+    toastBox.append(el);
+    while(toastBox.children.length > 4) toastBox.firstElementChild.remove();
+    timer = setTimeout(close, duration ?? (type === 'error' || action ? 6500 : 3200));
+  }
+
+  const ERRORS = {
+    'auth/invalid-email': 'Ungültige E‑Mail‑Adresse.',
+    'auth/missing-email': 'Bitte E‑Mail eingeben.',
+    'auth/missing-password': 'Bitte Passwort eingeben.',
+    'auth/weak-password': 'Passwort zu schwach (mindestens 6 Zeichen).',
+    'auth/email-already-in-use': 'Für diese E‑Mail gibt es schon ein Konto. Bitte anmelden.',
+    'auth/invalid-credential': 'E‑Mail oder Passwort ist falsch.',
+    'auth/wrong-password': 'E‑Mail oder Passwort ist falsch.',
+    'auth/user-not-found': 'E‑Mail oder Passwort ist falsch.',
+    'auth/user-disabled': 'Dieses Konto ist deaktiviert.',
+    'auth/too-many-requests': 'Zu viele Versuche. Bitte später erneut probieren.',
+    'auth/network-request-failed': 'Keine Verbindung. Für die Anmeldung wird Internet benötigt.',
+    'auth/unauthorized-domain': 'Diese Domain ist in Firebase nicht autorisiert (Authentication → Einstellungen → Autorisierte Domains).',
+    'auth/operation-not-allowed': 'Dieser Anmeldeweg ist in Firebase nicht aktiviert.',
+    'auth/account-exists-with-different-credential': 'Für diese E‑Mail existiert ein Konto mit anderer Anmeldemethode.',
+    'auth/popup-blocked': 'Popup wurde blockiert.',
+    'auth/invalid-api-key': 'Ungültiger apiKey in der Firebase-Konfiguration.',
+    'permission-denied': 'Zugriff verweigert (Sicherheitsregeln).',
+    'unauthenticated': 'Bitte erneut anmelden.',
+    'not-found': 'Eintrag existiert nicht mehr (auf anderem Gerät gelöscht?).',
+    'resource-exhausted': 'Firebase-Kontingent erschöpft. Bitte später erneut versuchen.',
+    'unavailable': 'Server nicht erreichbar – Änderungen werden später synchronisiert.',
+    'failed-precondition': 'Aktion im Moment nicht möglich (mehrere Tabs offen?).',
+    'invalid-argument': 'Ungültige Daten.',
+  };
+  const errorText = e => ERRORS[e?.code] || e?.message || 'Unbekannter Fehler.';
+  const reportError = (e, prefix = '') => { console.error(e); toast(prefix + errorText(e), { type: 'error' }); };
+
+  /* =====================================================================
+     3) DIALOGE (Glas-Modal mit Fokusfalle, Esc = erste Option)
+     ===================================================================== */
+  function focusables(root){
+    return Array.from(root.querySelectorAll('button, input, a[href], [tabindex]:not([tabindex="-1"])'))
+      .filter(el => !el.disabled && el.getClientRects().length);
+  }
+  function openModal({ title, body, buttons }){
+    return new Promise(resolve => {
+      const prevFocus = document.activeElement;
+      const overlay = mk('div', 'modal');
+      const box = mk('div', 'modal-box');
+      const titleId = 'm' + newId();
+      box.setAttribute('role', 'dialog'); box.setAttribute('aria-modal', 'true'); box.setAttribute('aria-labelledby', titleId);
+      const h = mk('h2', 'modal-title'); h.id = titleId; h.textContent = title;
+      const b = mk('div', 'modal-body');
+      if(typeof body === 'string'){ const p = mk('p'); p.textContent = body; b.append(p); } else b.append(body);
+      const actions = mk('div', 'modal-actions');
+      const cancelValue = buttons[0].value;
+      const close = v => {
+        document.removeEventListener('keydown', onKey, true);
+        overlay.remove();
+        if(prevFocus && document.contains(prevFocus)) prevFocus.focus();
+        resolve(v);
+      };
+      buttons.forEach(bt => {
+        const btn = mk('button', 'btn' + (bt.primary ? ' primary' : '')); btn.type = 'button'; btn.textContent = bt.label;
+        btn.addEventListener('click', () => close(bt.value));
+        actions.append(btn);
+      });
+      const onKey = e => {
+        if(e.key === 'Escape'){ e.preventDefault(); e.stopPropagation(); close(cancelValue); return; }
+        if(e.key !== 'Tab') return;
+        const f = focusables(box); if(!f.length) return;
+        const first = f[0], last = f[f.length - 1];
+        if(e.shiftKey && document.activeElement === first){ e.preventDefault(); last.focus(); }
+        else if(!e.shiftKey && document.activeElement === last){ e.preventDefault(); first.focus(); }
+        else if(!box.contains(document.activeElement)){ e.preventDefault(); first.focus(); }
+      };
+      overlay.addEventListener('pointerdown', e => { if(e.target === overlay) close(cancelValue); });
+      document.addEventListener('keydown', onKey, true);
+      box.append(h, b, actions); overlay.append(box); document.body.append(overlay);
+      (actions.querySelector('.primary') || actions.lastElementChild).focus();
+    });
+  }
+
+  /* =====================================================================
+     4) VALIDIERUNG (Import, Migration, Gastdaten)
+     ===================================================================== */
+  function toMillis(v){
+    let ms = null;
+    if(typeof v === 'number') ms = v;
+    else if(typeof v === 'string') ms = Date.parse(v);
+    else if(v && typeof v === 'object' && typeof v.seconds === 'number') ms = v.seconds * 1000;
+    return Number.isFinite(ms) && ms > 0 && ms <= Date.now() + 864e5 ? Math.round(ms) : null;
+  }
+  // Übernimmt nur bekannte Felder mit gültigen Typen; ungültige Aufgaben -> null
+  function sanitizeTask(raw){
+    if(!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    if(typeof raw.text !== 'string') return null;
+    const text = raw.text.trim();
+    if(!text || text.length > MAX_TEXT) return null;
+    const done = raw.done === true;
+    const createdAt = toMillis(raw.createdAt) ?? Date.now();
+    return {
+      id: typeof raw.id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(raw.id) ? raw.id : newId(),
+      text,
+      prio: raw.prio === 'red' ? 'red' : 'yellow',
+      done,
+      order: typeof raw.order === 'number' && Number.isFinite(raw.order) ? raw.order : null,
+      createdAt,
+      doneAt: done ? (toMillis(raw.doneAt) ?? createdAt) : null,
+    };
+  }
+  // Akzeptiert { tasks: [...] } oder [...]; liefert gültige Aufgaben mit neu durchnummeriertem order
+  function parseTaskList(data){
+    const arr = Array.isArray(data) ? data : (data && typeof data === 'object' && Array.isArray(data.tasks)) ? data.tasks : null;
+    if(!arr) throw new Error('Keine Aufgabenliste gefunden (erwartet: { "tasks": [ … ] }).');
+    if(arr.length > MAX_IMPORT) throw new Error(`Zu viele Aufgaben (max. ${MAX_IMPORT}).`);
+    const valid = []; let skipped = 0;
+    arr.forEach((raw, i) => { const t = sanitizeTask(raw); if(t){ t._i = i; valid.push(t); } else skipped++; });
+    const allOrdered = valid.every(t => t.order !== null);
+    valid.sort((a, b) => allOrdered ? ((a.order - b.order) || (a._i - b._i)) : (a._i - b._i));
+    valid.forEach((t, i) => { t.order = (i + 1) * ORDER_STEP; delete t._i; });
+    return { valid, skipped };
+  }
+  function readTaskArray(key){
+    const raw = lsGet(key); if(!raw) return [];
+    try { return parseTaskList(JSON.parse(raw)).valid; }
+    catch(e){ console.warn(`Konnte ${key} nicht lesen:`, e.message); return []; }
+  }
+
+  /* =====================================================================
+     5) HINTERGRUND (URL-Test, Komprimierung, Anwenden)
+     ===================================================================== */
+  const BG_MIMES = ['image/webp', 'image/jpeg'];
+  const isHttpsUrl = u => typeof u === 'string' && u.length <= 2048 && /^https:\/\/\S+$/i.test(u);
+  const isImageData = bg => bg && BG_MIMES.includes(bg.mime) && typeof bg.data === 'string'
+    && bg.data.length > 0 && bg.data.length <= BG_MAX_CHARS * 1.3 && /^[A-Za-z0-9+/]+={0,2}$/.test(bg.data);
+  const cssUrl = src => `url("${src.replace(/["\\\n\r]/g, c => encodeURIComponent(c))}")`;
+
+  let currentBgCss = null;
+  function applyBg(bg){
+    let css = '';
+    if(bg?.kind === 'url' && isHttpsUrl(bg.url)) css = cssUrl(bg.url);
+    else if(bg?.kind === 'upload' && isImageData(bg)) css = cssUrl(`data:${bg.mime};base64,${bg.data}`);
+    if(css === currentBgCss) return;
+    currentBgCss = css;
+    bgLayer.style.backgroundImage = css; // leer = Standardbild aus CSS
+  }
+
+  // Lädt die URL testweise als Bild – nur echte, direkte Bildlinks kommen durch
+  function testImageUrl(raw){
+    let url;
+    try { url = new URL(raw); } catch(e){ return Promise.reject(new Error('Ungültige URL.')); }
+    if(url.protocol !== 'https:') return Promise.reject(new Error('Bitte einen https‑Bildlink verwenden.'));
+    if(url.href.length > 2048) return Promise.reject(new Error('URL ist zu lang.'));
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const timer = setTimeout(() => { img.src = ''; reject(new Error('Bild lädt nicht (Zeitüberschreitung).')); }, 12000);
+      img.onload = () => { clearTimeout(timer); img.naturalWidth > 0 ? resolve(url.href) : reject(new Error('Kein gültiges Bild.')); };
+      img.onerror = () => { clearTimeout(timer); reject(new Error('Kein direkter Bildlink. Tipp: Rechtsklick aufs Bild → „Bildadresse kopieren“.')); };
+      img.referrerPolicy = 'no-referrer';
+      img.src = url.href;
+    });
+  }
+
+  async function loadImageSource(file){
+    if('createImageBitmap' in window){
+      try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+      catch(e){ console.warn('createImageBitmap fehlgeschlagen, nutze <img>', e); }
+    }
+    const url = URL.createObjectURL(file);
+    try {
+      const img = new Image(); img.src = url; await img.decode(); return img;
+    } finally { URL.revokeObjectURL(url); }
+  }
+  function canEncodeWebp(){
+    const c = mk('canvas'); c.width = c.height = 1;
+    return c.toDataURL('image/webp').startsWith('data:image/webp');
+  }
+  // Verkleinert auf max. 1920 px Breite und komprimiert (WebP, sonst JPEG), bis es ins Budget passt
+  async function compressImage(file){
+    if(!file.type.startsWith('image/')) throw new Error('Bitte eine Bilddatei wählen.');
+    if(file.size > 30 * 1024 * 1024) throw new Error('Bild ist zu groß (max. 30 MB).');
+    let src;
+    try { src = await loadImageSource(file); } catch(e){ throw new Error('Bild konnte nicht gelesen werden (Format nicht unterstützt?).'); }
+    const mime = canEncodeWebp() ? 'image/webp' : 'image/jpeg';
+    let maxW = BG_MAX_WIDTH, quality = 0.82;
+    try {
+      for(let attempt = 0; attempt < 10; attempt++){
+        const scale = Math.min(1, maxW / src.width);
+        const w = Math.max(1, Math.round(src.width * scale)), h = Math.max(1, Math.round(src.height * scale));
+        const canvas = mk('canvas'); canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#2b3440'; ctx.fillRect(0, 0, w, h); // transparente Bereiche
+        ctx.drawImage(src, 0, 0, w, h);
+        const dataUrl = canvas.toDataURL(mime, quality);
+        const data = dataUrl.slice(dataUrl.indexOf(',') + 1);
+        if(data.length <= BG_MAX_CHARS) return { mime, data, w, h };
+        if(quality > 0.6) quality = Math.round((quality - 0.1) * 100) / 100; else maxW = Math.round(maxW * 0.8);
+      }
+    } finally { src.close?.(); }
+    throw new Error('Bild ließ sich nicht klein genug komprimieren.');
+  }
+
+  function readLocalBg(){
+    const raw = lsGet(LS_BG);
+    if(!raw) return { kind: 'default' };
+    if(raw.startsWith('{')){
+      try {
+        const bg = JSON.parse(raw);
+        if(bg.kind === 'url' && isHttpsUrl(bg.url)) return { kind: 'url', url: bg.url };
+        if(bg.kind === 'upload' && isImageData(bg)) return { kind: 'upload', mime: bg.mime, data: bg.data };
+      } catch(e){ console.warn('Gespeicherter Hintergrund ungültig', e); }
+      return { kind: 'default' };
+    }
+    if(isHttpsUrl(raw)) return { kind: 'url', url: raw }; // Altformat: reine URL
+    lsDel(LS_BG); // Altformat: riesige Data-URL -> entfernen (verursachte Quota-Fehler)
+    return { kind: 'default' };
+  }
+
+  /* =====================================================================
+     6) DATENSPEICHER – lokal (Gastmodus)
+     Gleiches Interface wie der Cloud-Speicher:
+     subscribe, subscribeBg, add, update, remove, setOrders, bulk, setBg, destroy
+     ===================================================================== */
+  function createLocalStore(){
+    let tasks = readTaskArray(LS_GUEST);
+    const listeners = new Set(), bgListeners = new Set();
+    const emit = () => { const s = sortTasks(tasks); listeners.forEach(fn => fn(s, null)); };
+    function save(){
+      const ok = lsSet(LS_GUEST, JSON.stringify({ version: 3, updatedAt: new Date().toISOString(), tasks }));
+      if(!ok) toast('Lokales Speichern fehlgeschlagen (Speicher voll oder gesperrt).', { type: 'error' });
+    }
+    function onStorage(e){ // Sync zwischen Tabs im Gastmodus
+      if(e.key === LS_GUEST){ tasks = readTaskArray(LS_GUEST); emit(); }
+      if(e.key === LS_BG){ const bg = readLocalBg(); bgListeners.forEach(fn => fn(bg)); }
+    }
+    window.addEventListener('storage', onStorage);
+    return {
+      kind: 'local',
+      subscribe(fn){ listeners.add(fn); fn(sortTasks(tasks), null); return () => listeners.delete(fn); },
+      subscribeBg(fn){ bgListeners.add(fn); fn(readLocalBg()); return () => bgListeners.delete(fn); },
+      add(t){ tasks.push({ ...t }); save(); emit(); return Promise.resolve(); },
+      update(id, patch){
+        const t = tasks.find(x => x.id === id); if(!t) return Promise.resolve();
+        Object.assign(t, patch);
+        if('done' in patch) t.doneAt = patch.done ? Date.now() : null;
+        save(); emit(); return Promise.resolve();
+      },
+      remove(id){ tasks = tasks.filter(x => x.id !== id); save(); emit(); return Promise.resolve(); },
+      setOrders(map){ tasks.forEach(t => { if(map.has(t.id)) t.order = map.get(t.id); }); save(); emit(); return Promise.resolve(); },
+      bulk(list, { replace }){ tasks = (replace ? [] : tasks).concat(list.map(t => ({ ...t }))); save(); emit(); return Promise.resolve(); },
+      setBg(bg){
+        const ok = bg.kind === 'default' ? (lsDel(LS_BG), true) : lsSet(LS_BG, JSON.stringify(bg));
+        if(!ok) toast('Hintergrund konnte lokal nicht gespeichert werden (Speicher voll).', { type: 'error' });
+        bgListeners.forEach(fn => fn(bg));
+      },
+      destroy(){ window.removeEventListener('storage', onStorage); listeners.clear(); bgListeners.clear(); },
+    };
+  }
+
+  /* =====================================================================
+     7) DATENSPEICHER – Cloud (Firestore, Echtzeit + Offline-Cache)
+     users/{uid}                      -> { bg: {kind, url}, updatedAt }
+     users/{uid}/tasks/{taskId}       -> { text, prio, done, order, createdAt, doneAt, updatedAt }
+     users/{uid}/assets/background    -> { mime, data, updatedAt } (eigenes Bild, komprimiert)
+     ===================================================================== */
+  function createCloudStore(uid){
+    const { db, f } = fb;
+    const tasksCol = f.collection(db, 'users', uid, 'tasks');
+    const userDoc = f.doc(db, 'users', uid);
+    const bgDoc = f.doc(db, 'users', uid, 'assets', 'background');
+    const fail = e => reportError(e);
+    const ts = ms => f.Timestamp.fromMillis(ms);
+    const toTask = d => {
+      const x = d.data({ serverTimestamps: 'estimate' });
+      return {
+        id: d.id,
+        text: typeof x.text === 'string' ? x.text : '',
+        prio: x.prio === 'red' ? 'red' : 'yellow',
+        done: x.done === true,
+        order: Number.isFinite(x.order) ? x.order : 0,
+        createdAt: x.createdAt?.toMillis?.() ?? Date.now(),
+        doneAt: x.doneAt?.toMillis?.() ?? null,
+      };
+    };
+    const toDoc = t => ({
+      text: t.text, prio: t.prio, done: !!t.done, order: t.order,
+      createdAt: ts(t.createdAt), doneAt: t.doneAt != null ? ts(t.doneAt) : null,
+      updatedAt: f.serverTimestamp(),
+    });
+    // Schreibt in Batches à 450 Operationen (Limit 500). Promise erfüllt sich nach Server-Bestätigung.
+    function commitOps(ops){
+      const commits = [];
+      for(let i = 0; i < ops.length; i += 450){
+        const batch = f.writeBatch(db);
+        ops.slice(i, i + 450).forEach(op => op(batch));
+        commits.push(batch.commit());
+      }
+      const p = Promise.all(commits);
+      p.catch(fail);
+      return p;
+    }
+    return {
+      kind: 'cloud',
+      subscribe(fn){
+        return f.onSnapshot(f.query(tasksCol, f.orderBy('order')), { includeMetadataChanges: true },
+          snap => fn(snap.docs.map(toTask), snap.metadata), fail);
+      },
+      subscribeBg(fn){
+        let settings, asset; // undefined = noch nicht geladen
+        const emit = () => {
+          if(settings === undefined) return;
+          const bg = settings?.bg;
+          if(!bg || bg.kind === 'default') fn({ kind: 'default' });
+          else if(bg.kind === 'url') fn({ kind: 'url', url: bg.url });
+          else if(bg.kind === 'upload' && asset) fn({ kind: 'upload', mime: asset.mime, data: asset.data });
+        };
+        const u1 = f.onSnapshot(userDoc, s => { settings = s.exists() ? s.data() : null; emit(); }, fail);
+        const u2 = f.onSnapshot(bgDoc, s => { asset = s.exists() ? s.data() : null; emit(); }, fail);
+        return () => { u1(); u2(); };
+      },
+      add(t){ return f.setDoc(f.doc(tasksCol, t.id), { ...toDoc(t), createdAt: f.serverTimestamp() }).catch(fail); },
+      update(id, patch){
+        const data = { ...patch, updatedAt: f.serverTimestamp() };
+        if('done' in patch) data.doneAt = patch.done ? f.serverTimestamp() : null;
+        return f.updateDoc(f.doc(tasksCol, id), data).catch(fail);
+      },
+      remove(id){ return f.deleteDoc(f.doc(tasksCol, id)).catch(fail); },
+      setOrders(map){
+        return commitOps(Array.from(map, ([id, order]) => b => b.update(f.doc(tasksCol, id), { order, updatedAt: f.serverTimestamp() })));
+      },
+      bulk(list, { replace }){
+        const ops = [];
+        if(replace) state.tasks.forEach(t => ops.push(b => b.delete(f.doc(tasksCol, t.id))));
+        list.forEach(t => ops.push(b => b.set(f.doc(tasksCol, t.id), toDoc(t))));
+        return commitOps(ops);
+      },
+      setBg(bg){
+        const ops = [b => b.set(userDoc, { bg: { kind: bg.kind, url: bg.kind === 'url' ? bg.url : null }, updatedAt: f.serverTimestamp() })];
+        if(bg.kind === 'upload') ops.push(b => b.set(bgDoc, { mime: bg.mime, data: bg.data, updatedAt: f.serverTimestamp() }));
+        else ops.push(b => b.delete(bgDoc));
+        commitOps(ops);
+      },
+      destroy(){},
+    };
+  }
+
+  // Aktiven Speicher wechseln (Gast <-> Account)
+  function useStore(store){
+    unsubs.forEach(u => u()); unsubs = [];
+    state.store?.destroy();
+    state.store = store; state.tasks = []; state.pendingWrites = false; state.editingId = null;
+    els.forEach(el => el.remove()); els.clear();
+    render();
+    unsubs.push(store.subscribe((tasks, meta) => {
+      if(state.store !== store) return;
+      state.tasks = tasks;
+      render();
+      if(meta) handleSyncMeta(meta);
+      if(store.kind === 'cloud' && !state.migrationAsked){ state.migrationAsked = true; maybeMigrate(); }
+    }));
+    unsubs.push(store.subscribeBg(bg => { if(state.store === store) applyBg(bg); }));
+  }
+
+  /* =====================================================================
+     8) RENDERING (schlank: nur geänderte Einträge werden angefasst)
+     ===================================================================== */
+  const visibleTasks = () => state.tasks.filter(t => state.filter === 'all' || (state.filter === 'open' ? !t.done : t.done));
+  const PRIO_LABEL = { yellow: 'Priorität Gelb (normal)', red: 'Priorität Rot (hoch)' };
+
+  function createItem(id){
+    const item = mk('li', 'todo appear'); item.dataset.id = id;
+    const handle = mk('button', 'handle'); handle.type = 'button'; handle.textContent = '::';
+    const check = mk('input', 'check'); check.type = 'checkbox';
+    const prio = mk('span', 'prio'); prio.setAttribute('role', 'img');
+    const text = mk('div', 'todo-text'); text.tabIndex = 0; text.title = 'Doppelklick zum Bearbeiten';
+    const rm = mk('button', 'remove'); rm.type = 'button'; rm.textContent = 'x';
+    item.append(handle, check, prio, text, rm);
+    item._r = { handle, check, prio, text, rm };
+    item.addEventListener('animationend', () => item.classList.remove('appear'));
+    check.addEventListener('change', () => state.store.update(id, { done: check.checked }));
+    rm.addEventListener('click', () => removeTask(id));
+    text.addEventListener('dblclick', () => startEdit(id));
+    let lastTap = 0; // Doppeltipp auf Touch-Geräten
+    text.addEventListener('pointerup', e => {
+      if(e.pointerType === 'mouse') return;
+      const now = performance.now();
+      if(now - lastTap < 350){ lastTap = 0; e.preventDefault(); startEdit(id); } else lastTap = now;
+    });
+    return item;
+  }
+  function updateItem(el, t){
+    const r = el._r;
+    el.classList.toggle('done', t.done);
+    r.check.checked = t.done;
+    r.check.setAttribute('aria-label', `Erledigt: ${t.text}`);
+    r.prio.className = 'prio ' + t.prio;
+    r.prio.setAttribute('aria-label', PRIO_LABEL[t.prio]); r.prio.title = PRIO_LABEL[t.prio];
+    if(state.editingId !== t.id && r.text.textContent !== t.text) r.text.textContent = t.text;
+    r.handle.setAttribute('aria-label', `Verschieben: ${t.text} (Pfeiltasten hoch/runter)`); r.handle.title = 'Verschieben';
+    r.rm.setAttribute('aria-label', `Löschen: ${t.text}`); r.rm.title = 'Löschen';
+  }
+  function render(){
+    if(state.dragId) return; // während des Ziehens nicht neu sortieren
+    const vis = visibleTasks();
+    const keep = new Set(vis.map(t => t.id));
+    for(const [id, el] of els){
+      if(!keep.has(id)){ el.remove(); els.delete(id); if(state.editingId === id) state.editingId = null; }
+    }
+    let prev = null;
+    for(const t of vis){
+      let el = els.get(t.id);
+      if(!el){ el = createItem(t.id); els.set(t.id, el); }
+      updateItem(el, t);
+      const expected = prev ? prev.nextSibling : listEl.firstChild;
+      if(el !== expected) listEl.insertBefore(el, expected);
+      prev = el;
+    }
+    if(state.refocus){
+      const { id, cls } = state.refocus; state.refocus = null;
+      const target = els.get(id)?.querySelector('.' + cls);
+      if(target) target.focus(); else input.focus();
+    }
+    updateProgress();
+  }
+  function updateProgress(){
+    const total = state.tasks.length, done = state.tasks.filter(t => t.done).length, open = total - done;
+    const pct = total === 0 ? 0 : Math.round((done / total) * 100);
+    bar.style.width = pct + '%';
+    progressEl.setAttribute('aria-valuenow', String(pct));
+    progressText.textContent = pct + '%';
+    statsText.textContent = `${open} offen · ${done} erledigt`;
+  }
+
+  /* =====================================================================
+     9) AKTIONEN (Hinzufügen, Bearbeiten, Löschen, Filter, Priorität)
+     ===================================================================== */
+  function addTask(){
+    const text = input.value.trim();
+    if(!text) return;
+    if(text.length > MAX_TEXT){ toast(`Maximal ${MAX_TEXT} Zeichen.`, { type: 'error' }); return; }
+    state.store.add({ id: newId(), text, prio: state.prio, done: false, order: maxOrder() + ORDER_STEP, createdAt: Date.now(), doneAt: null });
+    input.value = '';
+    if(state.filter === 'done') toast('Hinzugefügt – sichtbar unter „Alle“ oder „Offen“.');
+  }
+
+  function removeTask(id){
+    const t = byId(id); if(!t) return;
+    const el = els.get(id);
+    const items = Array.from(listEl.children);
+    const idx = items.indexOf(el);
+    const neighbor = items[idx + 1] || items[idx - 1];
+    if(el?.contains(document.activeElement)) state.refocus = neighbor ? { id: neighbor.dataset.id, cls: 'check' } : { id: null, cls: 'none' };
+    const snapshot = { ...t };
+    const doRemove = () => state.store.remove(id);
+    if(el && !reducedMotion.matches){ el.classList.add('bye'); setTimeout(doRemove, 180); } else doRemove();
+    toast(`„${short(t.text)}“ gelöscht.`, { action: { label: 'Rückgängig', run: () => state.store.bulk([snapshot], { replace: false }) } });
+  }
+
+  function startEdit(id, viaKeyboard = false){
+    const el = els.get(id), t = byId(id);
+    if(!el || !t || state.editingId) return;
+    state.editingId = id;
+    const textEl = el._r.text;
+    const inp = mk('input', 'edit-input');
+    inp.value = t.text; inp.maxLength = MAX_TEXT; inp.setAttribute('aria-label', 'Aufgabe bearbeiten'); inp.enterKeyHint = 'done';
+    textEl.hidden = true; textEl.after(inp);
+    inp.focus(); inp.select();
+    let finished = false;
+    const finish = (save, refocus) => {
+      if(finished) return; finished = true;
+      const v = inp.value.trim();
+      inp.remove(); textEl.hidden = false; state.editingId = null;
+      const cur = byId(id);
+      if(save && cur && v && v !== cur.text) state.store.update(id, { text: v });
+      else if(save && !v) toast('Leerer Text – Änderung verworfen.');
+      render();
+      if(refocus) textEl.focus();
+    };
+    inp.addEventListener('keydown', e => {
+      if(e.key === 'Enter' && !e.isComposing){ e.preventDefault(); finish(true, true); }
+      else if(e.key === 'Escape'){ e.preventDefault(); e.stopPropagation(); finish(false, true); }
+    });
+    inp.addEventListener('blur', () => finish(true, false));
+    if(viaKeyboard) announce('Bearbeiten. Enter speichert, Escape bricht ab.');
+  }
+
+  function setPrio(p){
+    state.prio = p;
+    prioYellow.classList.toggle('active', p === 'yellow'); prioRed.classList.toggle('active', p === 'red');
+    prioYellow.setAttribute('aria-pressed', String(p === 'yellow')); prioRed.setAttribute('aria-pressed', String(p === 'red'));
+  }
+  function setFilter(f){
+    state.filter = f;
+    filterLabel.textContent = 'Filter: ' + (f === 'all' ? 'Alle' : f === 'open' ? 'Offen' : 'Erledigt');
+    Object.entries(filterBtns).forEach(([k, b]) => b.setAttribute('aria-pressed', String(k === f)));
+    render();
+  }
+
+  /* =====================================================================
+     10) SORTIEREN (Pointer Events für Maus + Touch, Pfeiltasten)
+     Neue Position = Mittelwert der order-Werte der Nachbarn -> meist nur 1 Schreibvorgang.
+     ===================================================================== */
+  function placeBetween(id, prevId, nextId){
+    const t = byId(id); if(!t) return false;
+    const full = state.tasks.filter(x => x.id !== id);
+    let a = null, b = null;
+    if(prevId){ const i = full.findIndex(x => x.id === prevId); if(i < 0) return false; a = full[i]; b = full[i + 1] || null; }
+    else if(nextId){ const i = full.findIndex(x => x.id === nextId); if(i < 0) return false; b = full[i]; a = full[i - 1] || null; }
+    else return false;
+    if((!a || t.order > a.order) && (!b || t.order < b.order)) return false; // steht schon dort
+    if(a && b && b.order - a.order < 1e-6){ // kein Platz mehr -> alles neu durchnummerieren
+      full.splice(full.indexOf(b), 0, t);
+      state.store.setOrders(new Map(full.map((x, i) => [x.id, (i + 1) * ORDER_STEP])));
+      return true;
+    }
+    const order = a && b ? (a.order + b.order) / 2 : a ? a.order + ORDER_STEP : b.order - ORDER_STEP;
+    state.store.update(id, { order });
+    return true;
+  }
+
+  function moveByKey(id, dir){
+    const vis = visibleTasks();
+    const i = vis.findIndex(t => t.id === id), j = i + dir;
+    if(i < 0 || j < 0 || j >= vis.length) return;
+    // Fokus vorab merken: der lokale Speicher rendert synchron, die Cloud später
+    const cls = document.activeElement?.classList.contains('todo-text') ? 'todo-text' : 'handle';
+    state.refocus = { id, cls };
+    const moved = dir < 0 ? placeBetween(id, vis[j - 1]?.id ?? null, vis[j].id) : placeBetween(id, vis[j].id, vis[j + 1]?.id ?? null);
+    if(moved) announce(`„${short(vis[i].text)}“ auf Position ${j + 1} von ${vis.length}.`);
+    else state.refocus = null;
+  }
+
+  function getDragAfterElement(container, y){
+    let closest = { offset: -Infinity, element: null };
+    container.querySelectorAll('.todo:not(.dragging)').forEach(child => {
+      const box = child.getBoundingClientRect();
+      const offset = y - box.top - box.height / 2;
+      if(offset < 0 && offset > closest.offset) closest = { offset, element: child };
+    });
+    return closest.element;
+  }
+
+  listEl.addEventListener('pointerdown', e => {
+    const item = e.target.closest('.todo');
+    if(!item || state.editingId || state.dragId) return;
+    const onHandle = !!e.target.closest('.handle');
+    if(e.pointerType === 'mouse'){
+      if(e.button !== 0) return;
+      if(!onHandle && e.target.closest('input, button')) return;
+    } else if(!onHandle) return; // Touch: nur über den Griff, damit die Liste scrollbar bleibt
+    const id = item.dataset.id, startY = e.clientY;
+    let started = false;
+    const move = ev => {
+      if(ev.pointerId !== e.pointerId) return;
+      if(!started){
+        if(Math.abs(ev.clientY - startY) < 5) return;
+        started = true; state.dragId = id;
+        item.classList.add('dragging'); document.body.classList.add('is-dragging');
+        window.getSelection()?.removeAllRanges();
+      }
+      ev.preventDefault();
+      const after = getDragAfterElement(listEl, ev.clientY);
+      if(after == null){ if(listEl.lastElementChild !== item) listEl.appendChild(item); }
+      else if(after !== item.nextElementSibling) listEl.insertBefore(item, after);
+      const r = listEl.getBoundingClientRect(); // Auto-Scroll an den Rändern
+      if(ev.clientY < r.top + 28) listEl.scrollTop -= 10; else if(ev.clientY > r.bottom - 28) listEl.scrollTop += 10;
+    };
+    const end = ev => {
+      if(ev.pointerId !== e.pointerId) return;
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', end);
+      if(!started) return;
+      item.classList.remove('dragging'); document.body.classList.remove('is-dragging');
+      state.dragId = null;
+      if(ev.type === 'pointerup'){
+        const ids = Array.from(listEl.children, el => el.dataset.id), i = ids.indexOf(id);
+        placeBetween(id, ids[i - 1] ?? null, ids[i + 1] ?? null);
+      }
+      render();
+      // Klick direkt nach dem Ziehen unterdrücken
+      window.addEventListener('click', ce => { ce.stopPropagation(); ce.preventDefault(); }, { capture: true, once: true });
+      setTimeout(() => window.dispatchEvent(new Event('click')), 0);
+    };
+    window.addEventListener('pointermove', move, { passive: false });
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
+  });
+
+  listEl.addEventListener('keydown', e => {
+    const item = e.target.closest('.todo');
+    if(!item || e.target.classList.contains('edit-input')) return;
+    const id = item.dataset.id;
+    if((e.key === 'ArrowUp' || e.key === 'ArrowDown') && (e.target.classList.contains('handle') || e.altKey)){
+      e.preventDefault(); moveByKey(id, e.key === 'ArrowUp' ? -1 : 1);
+    } else if((e.key === 'Enter' || e.key === 'F2') && e.target.classList.contains('todo-text')){
+      e.preventDefault(); startEdit(id, true);
+    }
+  });
+
+  /* =====================================================================
+     11) EXPORT / IMPORT
+     ===================================================================== */
+  async function exportJSON(){
+    const payload = {
+      app: 'glass-todo', version: 3, exportedAt: new Date().toISOString(),
+      tasks: state.tasks.map(t => ({
+        text: t.text, prio: t.prio, done: t.done, order: t.order,
+        createdAt: new Date(t.createdAt).toISOString(), doneAt: t.doneAt ? new Date(t.doneAt).toISOString() : null,
+      })),
+    };
+    const json = JSON.stringify(payload, null, 2);
+    const d = new Date();
+    const fname = `todos-${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}.json`;
+    try {
+      if('showSaveFilePicker' in window && window.isSecureContext && self === top){
+        const handle = await window.showSaveFilePicker({ suggestedName: fname, types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }] });
+        const w = await handle.createWritable(); await w.write(json); await w.close();
+      } else {
+        const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+        const a = mk('a'); a.href = url; a.download = fname; a.rel = 'noopener'; a.hidden = true;
+        document.body.append(a); a.click();
+        setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 0);
+      }
+      toast(`${plural(state.tasks.length, 'Aufgabe', 'Aufgaben')} exportiert.`, { type: 'success' });
+    } catch(e){
+      if(e.name === 'AbortError') return; // Nutzer hat abgebrochen
+      reportError(e, 'Export fehlgeschlagen: ');
+    }
+  }
+
+  async function importFile(file){
+    if(file.size > MAX_IMPORT_BYTES){ toast('Datei ist zu groß (max. 2 MB).', { type: 'error' }); return; }
+    let result;
+    try { result = parseTaskList(JSON.parse(await file.text())); }
+    catch(e){ console.error(e); toast(e instanceof SyntaxError ? 'Ungültige JSON-Datei.' : e.message, { type: 'error' }); return; }
+    const { valid, skipped } = result;
+    if(!valid.length){ toast('Keine gültigen Aufgaben in der Datei gefunden.', { type: 'error' }); return; }
+    const info = `${plural(valid.length, 'gültige Aufgabe', 'gültige Aufgaben')} gefunden` + (skipped ? `, ${skipped} ungültige werden verworfen.` : '.');
+    const mode = await openModal({
+      title: 'Import',
+      body: `${info} Zur bestehenden Liste hinzufügen oder die Liste komplett ersetzen?`,
+      buttons: [{ label: 'Abbrechen', value: null }, { label: 'Alle ersetzen', value: 'replace' }, { label: 'Hinzufügen', value: 'append', primary: true }],
+    });
+    if(!mode) return;
+    const base = mode === 'replace' ? 0 : maxOrder();
+    const list = valid.map((t, i) => ({ ...t, id: newId(), order: base + (i + 1) * ORDER_STEP }));
+    state.store.bulk(list, { replace: mode === 'replace' });
+    toast(`${plural(list.length, 'Aufgabe', 'Aufgaben')} importiert.`, { type: 'success' });
+  }
+
+  /* =====================================================================
+     12) MIGRATION alter lokaler Daten in den Account
+     ===================================================================== */
+  function findLegacySources(){
+    const sources = [];
+    const guest = readTaskArray(LS_GUEST);
+    if(guest.length) sources.push({ key: LS_GUEST, label: 'Ohne Login / Gastmodus', tasks: guest });
+    lsKeys().filter(k => k.startsWith(LS_PROFILE_PREFIX) && !k.endsWith('.pw')).sort().forEach(k => {
+      const tasks = readTaskArray(k);
+      if(tasks.length) sources.push({ key: k, label: `Altes Profil „${k.slice(LS_PROFILE_PREFIX.length)}“`, tasks });
+    });
+    return sources;
+  }
+  function cleanupLegacy(keys){
+    keys.forEach(k => { lsDel(k); if(k.startsWith(LS_PROFILE_PREFIX)) lsDel(k + '.pw'); });
+    const rest = lsKeys();
+    // leere alte Profile und Passwort-Hashes entfernen
+    rest.filter(k => k.startsWith(LS_PROFILE_PREFIX) && !k.endsWith('.pw') && !readTaskArray(k).length).forEach(k => { lsDel(k); lsDel(k + '.pw'); });
+    if(!lsKeys().some(k => k.startsWith(LS_PROFILE_PREFIX) && !k.endsWith('.pw'))){
+      lsKeys().filter(k => k.startsWith(LS_PROFILE_PREFIX)).forEach(lsDel);
+      lsDel(LS_LEGACY_USER);
+    }
+  }
+  const dedupeKey = t => t.text.trim().toLowerCase() + '|' + t.prio;
+
+  async function maybeMigrate(){
+    const sources = findLegacySources();
+    if(!sources.length){ cleanupLegacy([]); return; }
+    const body = mk('div');
+    const p = mk('p'); p.textContent = 'Auf diesem Gerät gibt es noch Aufgaben ohne Konto. In deinen Account übernehmen? Doppelte Einträge werden übersprungen.';
+    const ul = mk('ul', 'modal-list');
+    const boxes = sources.map(s => {
+      const li = mk('li'), label = mk('label'), cb = mk('input'), span = mk('span');
+      cb.type = 'checkbox'; cb.checked = true;
+      span.textContent = `${s.label} – ${plural(s.tasks.length, 'Aufgabe', 'Aufgaben')}`;
+      label.append(cb, span); li.append(label); ul.append(li);
+      return cb;
+    });
+    const note = mk('p'); note.textContent = 'Nicht ausgewählte Listen bleiben auf diesem Gerät und werden beim nächsten Login wieder angeboten.';
+    body.append(p, ul, note);
+    const choice = await openModal({
+      title: 'Lokale Aufgaben übernehmen?', body,
+      buttons: [{ label: 'Später', value: 'later' }, { label: 'Verwerfen', value: 'discard' }, { label: 'Übernehmen', value: 'migrate', primary: true }],
+    });
+    if(state.store?.kind !== 'cloud') return; // inzwischen abgemeldet
+    if(choice === 'discard'){
+      const sure = await openModal({
+        title: 'Wirklich verwerfen?',
+        body: 'Die lokalen Aufgaben werden von diesem Gerät gelöscht. Das lässt sich nicht rückgängig machen.',
+        buttons: [{ label: 'Abbrechen', value: false }, { label: 'Endgültig löschen', value: true, primary: true }],
+      });
+      if(sure){ cleanupLegacy(sources.map(s => s.key)); toast('Lokale Aufgaben gelöscht.'); }
+      return;
+    }
+    if(choice !== 'migrate') return;
+    const selected = sources.filter((s, i) => boxes[i].checked);
+    if(!selected.length) return;
+    const seen = new Set(state.tasks.map(dedupeKey));
+    let order = maxOrder(), dupes = 0;
+    const list = [];
+    for(const s of selected) for(const t of s.tasks){
+      const k = dedupeKey(t);
+      if(seen.has(k)){ dupes++; continue; }
+      seen.add(k); order += ORDER_STEP;
+      list.push({ ...t, id: newId(), order });
+    }
+    const keys = selected.map(s => s.key);
+    if(!list.length){ cleanupLegacy(keys); toast('Alles war schon im Account vorhanden.'); return; }
+    toast(`${plural(list.length, 'Aufgabe', 'Aufgaben')} übernommen` + (dupes ? `, ${dupes} doppelte übersprungen.` : '.'), { type: 'success' });
+    // Lokal erst aufräumen, wenn der Server bestätigt hat (offline: sobald wieder online)
+    state.store.bulk(list, { replace: false }).then(() => cleanupLegacy(keys), e => console.warn('Migration nicht bestätigt, lokale Daten bleiben erhalten', e));
+  }
+
+  /* =====================================================================
+     13) ONLINE-/OFFLINE-STATUS
+     ===================================================================== */
+  function handleSyncMeta(meta){
+    state.pendingWrites = meta.hasPendingWrites;
+    if(wasOffline && navigator.onLine && !meta.hasPendingWrites && !meta.fromCache){
+      wasOffline = false;
+      toast('Alle Änderungen synchronisiert.', { type: 'success' });
+    }
+  }
+  window.addEventListener('offline', () => {
+    wasOffline = true;
+    toast(state.store?.kind === 'cloud' ? 'Offline – Änderungen werden gespeichert und später synchronisiert.' : 'Offline.');
+  });
+  window.addEventListener('online', () => {
+    toast(state.store?.kind === 'cloud' ? 'Wieder online – synchronisiere …' : 'Wieder online.', { type: 'success' });
+    if(state.store?.kind !== 'cloud') wasOffline = false;
+  });
+
+  /* =====================================================================
+     14) FIREBASE LADEN & AUTHENTIFIZIERUNG
+     ===================================================================== */
+  async function initFirebase(){
+    const base = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}/`;
+    const [appMod, a, f] = await Promise.all([
+      import(base + 'firebase-app.js'), import(base + 'firebase-auth.js'), import(base + 'firebase-firestore.js'),
+    ]);
+    const app = appMod.initializeApp(firebaseConfig);
+    let db;
+    try {
+      db = f.initializeFirestore(app, { localCache: f.persistentLocalCache({ tabManager: f.persistentMultipleTabManager() }) });
+    } catch(e){
+      console.warn('Offline-Cache nicht verfügbar, nutze Speicher-Cache', e);
+      db = f.initializeFirestore(app, { localCache: f.memoryLocalCache() });
+    }
+    const auth = a.getAuth(app);
+    auth.languageCode = 'de';
+    return { app, db, auth, a, f };
+  }
+
+  function renderAuthUI(){
+    const u = state.user;
+    const name = u ? (u.email || u.displayName || 'Konto') : '';
+    loginOpen.textContent = u ? name : 'Login';
+    loginOpen.title = u ? `Angemeldet als ${name} – Cloud‑Sync aktiv` : 'Anmelden für Cloud‑Sync';
+    loginTitle.textContent = u ? 'Konto' : 'Login';
+    authForm.hidden = !!u; accountBox.hidden = !u; logoutBtn.hidden = !u;
+    accountEmail.textContent = name;
+    if(!FIREBASE_READY){
+      authHint.textContent = 'Cloud‑Sync ist noch nicht eingerichtet (Firebase‑Konfiguration fehlt). Die App läuft im Gastmodus – Aufgaben bleiben nur auf diesem Gerät.';
+      authForm.querySelectorAll('input, button').forEach(el => { el.disabled = true; });
+    } else {
+      authHint.textContent = u ? 'Deine Aufgaben werden auf allen Geräten synchronisiert – auch offline.' : 'Ohne Login bleiben Aufgaben nur auf diesem Gerät (Gastmodus).';
+    }
+  }
+  function setAuthBusy(busy){
+    if(!FIREBASE_READY) return;
+    [loginSubmit, registerBtn, resetBtn, googleBtn, logoutBtn].forEach(b => { b.disabled = busy; });
+  }
+  function requireFb(){
+    if(fb) return true;
+    toast(FIREBASE_READY ? 'Cloud wird noch geladen … bitte kurz warten.' : 'Firebase ist noch nicht konfiguriert.', { type: 'error' });
+    return false;
+  }
+  function readCredentials(needPassword = true){
+    const email = loginEmail.value.trim(), pass = loginPass.value;
+    if(!email || !loginEmail.checkValidity()){ toast('Bitte eine gültige E‑Mail eingeben.', { type: 'error' }); loginEmail.focus(); return null; }
+    if(needPassword && pass.length < 6){ toast('Passwort: mindestens 6 Zeichen.', { type: 'error' }); loginPass.focus(); return null; }
+    return { email, pass };
+  }
+  async function runAuth(fn){
+    if(!requireFb()) return;
+    setAuthBusy(true);
+    try { await fn(); } catch(e){ reportError(e); } finally { setAuthBusy(false); }
+  }
+
+  const signIn = () => runAuth(async () => {
+    const c = readCredentials(); if(!c) return;
+    await fb.a.signInWithEmailAndPassword(fb.auth, c.email, c.pass);
+    loginPass.value = ''; loginCtl.close();
+    toast('Angemeldet – Aufgaben werden synchronisiert.', { type: 'success' });
+  });
+  const register = () => runAuth(async () => {
+    const c = readCredentials(); if(!c) return;
+    const cred = await fb.a.createUserWithEmailAndPassword(fb.auth, c.email, c.pass);
+    loginPass.value = ''; loginCtl.close();
+    toast('Konto erstellt und angemeldet.', { type: 'success' });
+    fb.a.sendEmailVerification(cred.user).then(
+      () => toast('Bestätigungs‑E‑Mail wurde gesendet.'),
+      e => console.warn('Bestätigungs-E-Mail fehlgeschlagen', e));
+  });
+  const resetPassword = () => runAuth(async () => {
+    const c = readCredentials(false); if(!c) return;
+    await fb.a.sendPasswordResetEmail(fb.auth, c.email);
+    toast('Falls ein Konto existiert, wurde eine E‑Mail zum Zurücksetzen gesendet.', { type: 'success', duration: 6000 });
+  });
+  const googleSignIn = () => runAuth(async () => {
+    const provider = new fb.a.GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    try {
+      await fb.a.signInWithPopup(fb.auth, provider);
+      loginCtl.close();
+      toast('Mit Google angemeldet.', { type: 'success' });
+    } catch(e){
+      if(e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') return;
+      if(e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-environment'){
+        await fb.a.signInWithRedirect(fb.auth, provider); // Fallback, falls Popups blockiert sind
+        return;
+      }
+      throw e;
+    }
+  });
+  const logout = () => runAuth(async () => {
+    if(state.pendingWrites){
+      const ok = await openModal({
+        title: 'Noch nicht synchronisiert',
+        body: 'Einige Änderungen sind noch nicht in der Cloud (offline?). Beim Abmelden gehen sie verloren. Trotzdem abmelden?',
+        buttons: [{ label: 'Abbrechen', value: false }, { label: 'Trotzdem abmelden', value: true, primary: true }],
+      });
+      if(!ok) return;
+    }
+    lsSet(LS_MODE, 'guest');
+    useStore(createLocalStore());
+    await fb.a.signOut(fb.auth);
+    // Offline-Cache löschen, damit auf geteilten Geräten keine Aufgaben zurückbleiben
+    try { await fb.f.terminate(fb.db); await fb.f.clearIndexedDbPersistence(fb.db); }
+    catch(e){ console.warn('Offline-Cache konnte nicht gelöscht werden (anderer Tab offen?)', e); }
+    location.reload();
+  });
+
+  function onUser(user){
+    const prevUid = state.user?.uid;
+    state.user = user;
+    renderAuthUI();
+    if(user){
+      lsSet(LS_MODE, 'cloud');
+      if(prevUid !== user.uid || state.store?.kind !== 'cloud'){ state.migrationAsked = false; useStore(createCloudStore(user.uid)); }
+    } else {
+      lsSet(LS_MODE, 'guest');
+      if(state.store?.kind !== 'local') useStore(createLocalStore());
+    }
+  }
+
+  /* =====================================================================
+     15) PANELS (Login, Hintergrund): Esc, Klick daneben, Fokus
+     ===================================================================== */
+  function makePanel(panel, opener, closeBtn){
+    const isOpen = () => !panel.classList.contains('hidden');
+    const open = () => {
+      panel.classList.remove('hidden'); opener.setAttribute('aria-expanded', 'true');
+      focusables(panel)[0]?.focus();
+    };
+    const close = (restoreFocus = true) => {
+      if(!isOpen()) return;
+      panel.classList.add('hidden'); opener.setAttribute('aria-expanded', 'false');
+      if(restoreFocus) opener.focus();
+    };
+    opener.addEventListener('click', () => isOpen() ? close() : open());
+    closeBtn.addEventListener('click', () => close());
+    panel.addEventListener('keydown', e => { if(e.key === 'Escape'){ e.preventDefault(); close(); } });
+    document.addEventListener('pointerdown', e => {
+      if(isOpen() && !panel.contains(e.target) && !opener.contains(e.target) && !e.target.closest('.modal, .toast')) close(false);
+    }, true);
+    return { open, close };
+  }
+  const loginCtl = makePanel(loginPanel, loginOpen, loginClose);
+  const bgCtl = makePanel(bgPanel, bgOpen, bgClose);
+
+  /* =====================================================================
+     16) EVENTS
+     ===================================================================== */
+  addBtn.addEventListener('click', addTask);
+  input.addEventListener('keydown', e => { if(e.key === 'Enter' && !e.isComposing) addTask(); });
+  prioYellow.addEventListener('click', () => setPrio('yellow'));
+  prioRed.addEventListener('click', () => setPrio('red'));
+  Object.entries(filterBtns).forEach(([f, b]) => b.addEventListener('click', () => setFilter(f)));
+  exportBtn.addEventListener('click', exportJSON);
+  importBtn.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', e => { const f = e.target.files?.[0]; e.target.value = ''; if(f) importFile(f); });
+
+  authForm.addEventListener('submit', e => { e.preventDefault(); signIn(); });
+  registerBtn.addEventListener('click', register);
+  resetBtn.addEventListener('click', resetPassword);
+  googleBtn.addEventListener('click', googleSignIn);
+  logoutBtn.addEventListener('click', logout);
+
+  async function withBusy(btn, fn){
+    btn.disabled = true;
+    try { await fn(); } catch(e){ reportError(e); } finally { btn.disabled = false; }
+  }
+  bgApply.addEventListener('click', () => withBusy(bgApply, async () => {
+    const raw = bgUrl.value.trim(); if(!raw){ bgUrl.focus(); return; }
+    const url = await testImageUrl(raw);
+    state.store.setBg({ kind: 'url', url });
+    bgUrl.value = ''; bgCtl.close();
+    toast('Hintergrund übernommen.', { type: 'success' });
+  }));
+  bgUrl.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); bgApply.click(); } });
+  bgUpload.addEventListener('click', () => bgFile.click());
+  bgFile.addEventListener('change', e => {
+    const file = e.target.files?.[0]; e.target.value = '';
+    if(!file) return;
+    withBusy(bgUpload, async () => {
+      toast('Bild wird komprimiert …');
+      const img = await compressImage(file);
+      state.store.setBg({ kind: 'upload', mime: img.mime, data: img.data });
+      bgCtl.close();
+      toast(`Hintergrund gespeichert (${img.w}×${img.h}, ${Math.round(img.data.length * 0.75 / 1024)} KB).`, { type: 'success' });
+    });
+  });
+  bgReset.addEventListener('click', () => { state.store.setBg({ kind: 'default' }); bgCtl.close(); toast('Standard‑Hintergrund wiederhergestellt.'); });
+
+  /* =====================================================================
+     17) START
+     ===================================================================== */
+  setFilter('all'); setPrio('yellow'); renderAuthUI();
+  // War zuletzt jemand angemeldet, nicht kurz die Gastliste aufblitzen lassen
+  const expectCloud = FIREBASE_READY && lsGet(LS_MODE) === 'cloud';
+  if(!expectCloud) useStore(createLocalStore());
+
+  if(FIREBASE_READY){
+    initFirebase().then(x => {
+      fb = x;
+      fb.a.getRedirectResult(fb.auth).then(r => { if(r?.user) toast('Mit Google angemeldet.', { type: 'success' }); }, e => reportError(e));
+      fb.a.onAuthStateChanged(fb.auth, onUser);
+    }).catch(e => {
+      console.error(e);
+      toast('Cloud‑Sync konnte nicht geladen werden – Gastmodus aktiv.', { type: 'error' });
+      if(!state.store) useStore(createLocalStore());
+    });
+  }
+
+  // Optionaler Service Worker (sw.js) für Start ohne Netz
+  if('serviceWorker' in navigator && location.protocol === 'https:'){
+    navigator.serviceWorker.register('sw.js').catch(e => console.info('Kein Service Worker aktiv:', e.message));
+  }
+  </script>
+</body>
+</html>
